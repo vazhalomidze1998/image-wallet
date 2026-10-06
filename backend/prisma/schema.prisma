@@ -1,0 +1,189 @@
+generator client {
+  provider      = "prisma-client-js"
+  // "native" for local dev; linux-musl for the Alpine-based Docker image.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum TransactionCategory {
+  TOP_UP
+  TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  username        String    @unique @db.VarChar(30)
+  /// Always stored lowercased.
+  email           String    @unique @db.VarChar(255)
+  passwordHash    String    @map("password_hash")
+  /// Verified E.164 number; top-up confirmation codes are sent here. Null until verified.
+  phone           String?   @unique @db.VarChar(16)
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  wallet            Wallet?
+  images            Image[]
+  payments          Payment[]
+  phoneVerification PhoneVerification?
+
+  @@map("users")
+}
+
+/// A phone number waiting for its SMS code (at most one per user). Deleted once verified.
+model PhoneVerification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  /// E.164 number the code was sent to.
+  phone     String   @db.VarChar(16)
+  /// HMAC of the code, bound to the user and the number; never the code itself.
+  otpHash   String   @map("otp_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at")
+  sentAt    DateTime @map("sent_at")
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("phone_verifications")
+}
+
+model Wallet {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  /// CHECK (balance >= 0) is enforced in the migration SQL.
+  balance   Decimal  @default(0) @db.Decimal(18, 2)
+  currency  String   @default("USD") @db.Char(3)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions        Transaction[] @relation("WalletTransactions")
+  counterpartyEntries Transaction[] @relation("CounterpartyTransactions")
+  payments            Payment[]
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id                   String              @id @default(uuid()) @db.Uuid
+  walletId             String              @map("wallet_id") @db.Uuid
+  type                 TransactionType
+  category             TransactionCategory
+  status               TransactionStatus   @default(PENDING)
+  /// Always positive; direction is given by `type`. CHECK (amount > 0) in migration SQL.
+  amount               Decimal             @db.Decimal(18, 2)
+  description          String?             @db.VarChar(255)
+  /// Shared by both legs of a transfer (trf_...) or equal to the payment's providerTxId (tx_...).
+  referenceId          String              @map("reference_id") @db.VarChar(64)
+  counterpartyWalletId String?             @map("counterparty_wallet_id") @db.Uuid
+  paymentId            String?             @unique @map("payment_id") @db.Uuid
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  wallet             Wallet   @relation("WalletTransactions", fields: [walletId], references: [id], onDelete: Cascade)
+  counterpartyWallet Wallet?  @relation("CounterpartyTransactions", fields: [counterpartyWalletId], references: [id], onDelete: SetNull)
+  payment            Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([referenceId, walletId])
+  @@index([walletId, createdAt(sort: Desc)])
+  @@index([walletId, type, createdAt])
+  @@index([referenceId])
+  @@map("transactions")
+}
+
+model Payment {
+  id           String        @id @default(uuid()) @db.Uuid
+  /// Public id returned to the client and sent back by the webhook ("tx_...").
+  providerTxId String        @unique @map("provider_tx_id") @db.VarChar(64)
+  userId       String        @map("user_id") @db.Uuid
+  walletId     String        @map("wallet_id") @db.Uuid
+  /// CHECK (amount > 0) in migration SQL.
+  amount       Decimal       @db.Decimal(18, 2)
+  currency     String        @default("USD") @db.Char(3)
+  status       PaymentStatus @default(PENDING)
+  processedAt  DateTime?     @map("processed_at")
+  /// E.164 number the confirmation code is sent to.
+  phone        String?       @db.VarChar(16)
+  /// HMAC of the current one-time code; never the code itself.
+  otpHash      String?       @map("otp_hash") @db.VarChar(64)
+  otpExpiresAt DateTime?     @map("otp_expires_at")
+  otpSentAt    DateTime?     @map("otp_sent_at")
+  otpSendCount Int           @default(0) @map("otp_send_count")
+  otpAttempts  Int           @default(0) @map("otp_attempts")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet      Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  transaction Transaction?
+
+  @@index([userId, createdAt])
+  @@map("payments")
+}
+
+model Image {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  originalName String   @map("original_name") @db.VarChar(255)
+  s3Key        String   @unique @map("s3_key")
+  bucket       String
+  mimeType     String   @map("mime_type") @db.VarChar(50)
+  format       String   @db.VarChar(10)
+  width        Int
+  height       Int
+  /// Bytes.
+  size         Int
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  variants ImageVariant[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("images")
+}
+
+model ImageVariant {
+  id              String   @id @default(uuid()) @db.Uuid
+  imageId         String   @map("image_id") @db.Uuid
+  /// SHA-256 (hex) of the normalized transformation options.
+  hash            String   @db.Char(64)
+  /// Normalized options that produced this variant.
+  transformations Json
+  s3Key           String   @unique @map("s3_key")
+  bucket          String
+  mimeType        String   @map("mime_type") @db.VarChar(50)
+  format          String   @db.VarChar(10)
+  width           Int
+  height          Int
+  size            Int
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  image Image @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([imageId, hash])
+  @@map("image_variants")
+}

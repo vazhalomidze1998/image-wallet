@@ -1,0 +1,1201 @@
+{
+  "info": {
+    "name": "ImageWallet API",
+    "description": "All endpoints of the Image Processing + Wallet API (Vazha Lomidze).\n\nRun the folders top to bottom: tokens, image ids and transaction ids are saved automatically into collection variables.\n\nBefore running:\n1. Easiest: import `ImageWallet.local.postman_collection.json` (generated locally with your secret, not committed): nothing else to configure.\n2. Otherwise set the collection variable `webhookSecret` (Variables tab) or an environment to WEBHOOK_SECRET from `backend/.env`.\n3. In **Images → Upload image**, pick a JPEG/PNG/WebP file in Body → form-data → image.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000/api"
+    },
+    {
+      "key": "webhookSecret",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "receiverToken",
+      "value": ""
+    },
+    {
+      "key": "username",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": ""
+    },
+    {
+      "key": "password",
+      "value": "password123"
+    },
+    {
+      "key": "receiverEmail",
+      "value": ""
+    },
+    {
+      "key": "imageId",
+      "value": ""
+    },
+    {
+      "key": "transactionId",
+      "value": ""
+    },
+    {
+      "key": "failedTransactionId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "{",
+              "  pm.test('API and database are up', () => {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().data.database).to.eql('up');",
+              "  });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "{",
+                  "  // Unique user on every run.",
+                  "  const id = Date.now().toString().slice(-8);",
+                  "  pm.collectionVariables.set('username', 'user_' + id);",
+                  "  pm.collectionVariables.set('email', 'user' + id + '@example.com');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const body = pm.response.json();",
+                  "  pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "  pm.test('returns user + token, never the password', () => {",
+                  "    pm.expect(body.data.token).to.be.a('string');",
+                  "    pm.expect(body.data.user.email).to.eql(pm.collectionVariables.get('email'));",
+                  "    pm.expect(pm.response.text()).to.not.include('password');",
+                  "  });",
+                  "  pm.collectionVariables.set('token', body.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Register second user (transfer receiver)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const id = Date.now().toString().slice(-8);",
+                  "  pm.variables.set('receiverUsername', 'receiver_' + id);",
+                  "  pm.collectionVariables.set('receiverEmail', 'receiver' + id + '@example.com');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "  pm.collectionVariables.set('receiverToken', pm.response.json().data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{receiverUsername}}\",\n  \"email\": \"{{receiverEmail}}\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Register – duplicate email (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('409 EMAIL_TAKEN', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().error.code).to.eql('EMAIL_TAKEN');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"someone_else\",\n  \"email\": \"{{email}}\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200 + token', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.token).to.be.a('string');",
+                  "  });",
+                  "  pm.collectionVariables.set('token', pm.response.json().data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login – wrong password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('401 INVALID_CREDENTIALS', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().error.code).to.eql('INVALID_CREDENTIALS');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"wrong-password\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Me (current user)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me"
+          }
+        },
+        {
+          "name": "Me – without token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('401 UNAUTHORIZED', () => pm.response.to.have.status(401));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Images",
+      "item": [
+        {
+          "name": "Upload image",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "  const data = pm.response.json().data;",
+                  "  pm.test('metadata + presigned URL', () => {",
+                  "    pm.expect(data.width).to.be.above(0);",
+                  "    pm.expect(data.url).to.include('X-Amz-Signature');",
+                  "  });",
+                  "  pm.collectionVariables.set('imageId', data.id);",
+                  "  console.log('Open this URL in a browser to see the image:', data.url);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/images",
+            "description": "Body → form-data → key `image` (type File): choose a JPEG, PNG or WebP up to 10 MB."
+          }
+        },
+        {
+          "name": "List images (paginated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200 + pagination', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().pagination).to.have.keys('page', 'limit', 'total', 'totalPages');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/images?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "images"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get image (with presigned URL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/images/{{imageId}}"
+          }
+        },
+        {
+          "name": "Get image – as another user (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('404 IMAGE_NOT_FOUND (ownership)', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().error.code).to.eql('IMAGE_NOT_FOUND');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{receiverToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/images/{{imageId}}"
+          }
+        },
+        {
+          "name": "Transform (resize → rotate → grayscale → watermark → WebP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const data = pm.response.json().data;",
+                  "  pm.test('201 on first run, 200 + cached afterwards', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "    pm.expect(data.format).to.eql('webp');",
+                  "  });",
+                  "  console.log('cached:', data.cached, '→', data.url);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transformations\": {\n    \"resize\": { \"width\": 800, \"height\": 600 },\n    \"rotate\": 90,\n    \"grayscale\": true,\n    \"watermark\": { \"text\": \"Vazha Lomidze\", \"position\": \"southeast\" },\n    \"format\": \"webp\",\n    \"quality\": 80\n  }\n}"
+            },
+            "url": "{{baseUrl}}/images/{{imageId}}/transform"
+          }
+        },
+        {
+          "name": "Transform – same again (cached, 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('served from cache', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.cached).to.eql(true);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transformations\": {\n    \"format\": \"webp\",\n    \"quality\": 80,\n    \"watermark\": { \"position\": \"southeast\", \"text\": \"Vazha Lomidze\" },\n    \"grayscale\": true,\n    \"rotate\": -270,\n    \"resize\": { \"height\": 600, \"width\": 800 }\n  }\n}"
+            },
+            "url": "{{baseUrl}}/images/{{imageId}}/transform",
+            "description": "Same transformations in a different key order and -270 instead of 90: normalization makes it the same cache entry."
+          }
+        },
+        {
+          "name": "Transform – crop + sepia + mirror → PNG",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200/201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transformations\": {\n    \"crop\": { \"left\": 0, \"top\": 0, \"width\": 200, \"height\": 200 },\n    \"sepia\": true,\n    \"mirror\": true,\n    \"format\": \"png\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/images/{{imageId}}/transform",
+            "description": "The crop area must fit inside the image, otherwise 400 INVALID_CROP."
+          }
+        },
+        {
+          "name": "Transform – invalid options (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('400 VALIDATION_ERROR', () => pm.response.to.have.status(400));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transformations\": { \"quality\": 150, \"format\": \"gif\" }\n}"
+            },
+            "url": "{{baseUrl}}/images/{{imageId}}/transform"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Wallet & payments",
+      "item": [
+        {
+          "name": "Get wallet (starts at 0.00)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200', () => pm.response.to.have.status(200));",
+                  "  console.log('balance:', pm.response.json().data.balance);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/wallet"
+          }
+        },
+        {
+          "name": "Checkout (pending top-up)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const data = pm.response.json().data;",
+                  "  pm.test('201 PENDING', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(data.status).to.eql('PENDING');",
+                  "    pm.expect(data.amount).to.eql('100.00');",
+                  "  });",
+                  "  pm.collectionVariables.set('transactionId', data.transaction_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100.00\n}"
+            },
+            "url": "{{baseUrl}}/payments/checkout"
+          }
+        },
+        {
+          "name": "Webhook SUCCESS (signed)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "{",
+                  "  // Signs the exact body that will be sent, like a real payment provider.",
+                  "  const secret = pm.environment.get('webhookSecret') || pm.collectionVariables.get('webhookSecret');",
+                  "  if (!secret || secret.startsWith('PASTE')) {",
+                  "    throw new Error('Set webhookSecret (collection Variables tab or environment) to WEBHOOK_SECRET from backend/.env');",
+                  "  }",
+                  "  const body = pm.variables.replaceIn(pm.request.body.raw);",
+                  "  const signature = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+                  "  pm.request.headers.upsert({ key: 'X-Webhook-Signature', value: 'sha256=' + signature });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200 COMPLETED (first time)', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.status).to.eql('COMPLETED');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"transaction_id\":\"{{transactionId}}\",\"status\":\"SUCCESS\"}"
+            },
+            "url": "{{baseUrl}}/payments/webhook"
+          }
+        },
+        {
+          "name": "Webhook SUCCESS again (idempotent)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const secret = pm.environment.get('webhookSecret') || pm.collectionVariables.get('webhookSecret');",
+                  "  const body = pm.variables.replaceIn(pm.request.body.raw);",
+                  "  const signature = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+                  "  pm.request.headers.upsert({ key: 'X-Webhook-Signature', value: 'sha256=' + signature });",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200 alreadyProcessed – wallet NOT credited twice', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.alreadyProcessed).to.eql(true);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"transaction_id\":\"{{transactionId}}\",\"status\":\"SUCCESS\"}"
+            },
+            "url": "{{baseUrl}}/payments/webhook"
+          }
+        },
+        {
+          "name": "Webhook – bad signature (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('401 INVALID_SIGNATURE', () => pm.response.to.have.status(401));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Webhook-Signature",
+                "value": "sha256=forged"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"transaction_id\":\"{{transactionId}}\",\"status\":\"SUCCESS\"}"
+            },
+            "url": "{{baseUrl}}/payments/webhook"
+          }
+        },
+        {
+          "name": "Checkout + Simulate FAILED (dev helper, no secret needed)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "{",
+                  "  // Creates a new pending payment first, then this request declines it.",
+                  "  pm.sendRequest({",
+                  "    url: pm.variables.replaceIn('{{baseUrl}}/payments/checkout'),",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pm.collectionVariables.get('token') },",
+                  "    body: { mode: 'raw', raw: JSON.stringify({ amount: '25.00' }) },",
+                  "  }, (err, res) => pm.collectionVariables.set('failedTransactionId', res.json().data.transaction_id));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200 FAILED – balance unchanged', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.status).to.eql('FAILED');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"FAILED\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/{{failedTransactionId}}/simulate",
+            "description": "Development-only endpoint that plays the payment provider. Use SUCCESS or FAILED."
+          }
+        },
+        {
+          "name": "Get wallet (after top-up → 100.00)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('balance 100.00', () => pm.expect(pm.response.json().data.balance).to.eql('100.00'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/wallet"
+          }
+        },
+        {
+          "name": "Transfer 50.00",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('201 + new balance 50.00', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(pm.response.json().data.balance).to.eql('50.00');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver_email\": \"{{receiverEmail}}\",\n  \"amount\": 50.00,\n  \"description\": \"Dinner repayment\"\n}"
+            },
+            "url": "{{baseUrl}}/wallet/transfer"
+          }
+        },
+        {
+          "name": "Transfer – insufficient balance (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('422 INSUFFICIENT_FUNDS', () => {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.json().error.code).to.eql('INSUFFICIENT_FUNDS');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver_email\": \"{{receiverEmail}}\",\n  \"amount\": 999999\n}"
+            },
+            "url": "{{baseUrl}}/wallet/transfer"
+          }
+        },
+        {
+          "name": "Transfer – to yourself (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('400 SELF_TRANSFER', () => pm.expect(pm.response.json().error.code).to.eql('SELF_TRANSFER'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver_email\": \"{{email}}\",\n  \"amount\": 1\n}"
+            },
+            "url": "{{baseUrl}}/wallet/transfer"
+          }
+        },
+        {
+          "name": "Transfer – unknown receiver (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('404 RECEIVER_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('RECEIVER_NOT_FOUND'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver_email\": \"nobody-here@example.com\",\n  \"amount\": 1\n}"
+            },
+            "url": "{{baseUrl}}/wallet/transfer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. History, analytics, export",
+      "item": [
+        {
+          "name": "Transactions (all)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('200', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/wallet/transactions?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "type",
+                  "value": "INCOME",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Enable the type / from / to query params in the Params tab to filter."
+          }
+        },
+        {
+          "name": "Transactions (EXPENSE, date range)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('only EXPENSE rows', () => {",
+                  "    pm.response.json().data.forEach((t) => pm.expect(t.type).to.eql('EXPENSE'));",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/wallet/transactions?page=1&limit=10&type=EXPENSE&from=2026-01-01&to=2030-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "type",
+                  "value": "EXPENSE"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2030-12-31"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Analytics (current month)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  const d = pm.response.json().data;",
+                  "  pm.test('income 100.00, expense 50.00', () => {",
+                  "    pm.expect(d.totalIncome).to.eql('100.00');",
+                  "    pm.expect(d.totalExpense).to.eql('50.00');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/wallet/analytics"
+          }
+        },
+        {
+          "name": "Export CSV",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('CSV download headers', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+                  "    pm.expect(pm.response.headers.get('Content-Disposition')).to.include('attachment');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/wallet/transactions/export?format=csv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "transactions",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "csv"
+                }
+              ]
+            },
+            "description": "Use Send → Send and Download to save the file."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Cleanup",
+      "item": [
+        {
+          "name": "Delete image",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('204 No Content', () => pm.response.to.have.status(204));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/images/{{imageId}}"
+          }
+        },
+        {
+          "name": "Get deleted image (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "{",
+                  "  pm.test('404 after delete', () => pm.response.to.have.status(404));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/images/{{imageId}}"
+          }
+        }
+      ]
+    }
+  ]
+}

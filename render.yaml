@@ -1,0 +1,61 @@
+# Render Blueprint for the backend (free plan).
+# Database: Neon (free PostgreSQL), images: Cloudflare R2, frontend: Cloudflare Pages.
+# Render → New → Blueprint → pick this repo; it asks for every `sync: false` value.
+services:
+  - type: web
+    name: image-wallet-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    # devDependencies (typescript, prisma CLI) are needed to build, even with NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    # Free plan has no pre-deploy step, so migrations run on every start (no-op when up to date).
+    startCommand: npx prisma migrate deploy && node dist/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Render sets PORT itself.
+
+      # Neon → Connection string, *direct* (not "Pooled"): prisma migrate needs a direct connection.
+      - key: DATABASE_URL
+        sync: false
+
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 1h
+      - key: BCRYPT_SALT_ROUNDS
+        value: "12"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+      # Frontend URL, e.g. https://image-wallet.pages.dev (comma-separated for several).
+      - key: CORS_ORIGIN
+        sync: false
+
+      # Cloudflare R2 (S3-compatible).
+      - key: AWS_REGION
+        value: auto
+      - key: AWS_S3_ENDPOINT
+        sync: false # https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+      - key: AWS_S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+      # Twilio (optional). Without it top-up codes cannot be delivered in production.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
