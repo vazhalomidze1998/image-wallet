@@ -37,6 +37,8 @@ services:
       # Frontend URL, e.g. https://image-wallet.pages.dev (comma-separated for several).
       - key: CORS_ORIGIN
         sync: false
+        key: AWS_S3_BUCKET
+        value: image-wallet
 
       # Cloudflare R2 (S3-compatible).
       - key: AWS_REGION
